@@ -36,60 +36,105 @@ class Base extends HTMLElement {
     // Required - Debugging method
     log(...args) {
         if(this.debug === true) {
-            console.log(...args)
+            if(this.stackTrace) {
+              console.trace(...args);
+            } else {
+              console.log(...args);
+            }
         }
     }
     
     // Required for 2-way data binding
     setWatchers() {
         
+        // Check if the watch property is defined and is an array
         if(!this.watch || !Array.isArray(this.watch)) {
             return;
         }  
-        
         
         // Function to recursively add getters and setters for properties
         function recursivelyAddProxyWatchers(context, propertyName, value, component) {
             const primitivePropertyValue = typeof value !== 'object' || value === null;
             // If the property is a primitive value, create a getter and setter
-            if (primitivePropertyValue) {
-              Object.defineProperty(context, propertyName, {
-                get: function() {
-                    return context['_' + propertyName];
+
+            //HANDLES ALL GET/SET for objects on or within a watched property
+            const handler = {
+                get(target, property, receiver) {
+                  if(!property) return '';
+                  return Reflect.get(target, property, receiver);
                 },
-                set: function(value) {
-                  if (primitivePropertyValue) {
-                      context['_' + propertyName] = value;
-                  } else {
-                    //call recursivelyAddProxyWatchers on each property of the object
+                set(target, property, value, receiver) {
+                  if(!property ) return null;
+                  const primitiveValue = typeof value !== 'object' || value === null;
+                  if(!primitiveValue) {
+                    // If the value is an object, recursively add watchers to its properties
                     Object.keys(value).forEach(key => {
+                      recursivelyAddProxyWatchers(value, key, value[key], component);
+                    });
+                  } 
+                  if(component.initialized)
+                    setTimeout(() => component.render(), 0);
+                  return Reflect.set(target, property, value, receiver);
+                }
+      
+              }
+            
+            // Creates getter/setter for all properties on the component that are being passed into the function
+            // This allows for 2-way data binding
+            // If the property is a primitive value, create a getter and setter
+            // If the property is an object, create a proxy to handle nested properties
+            // If the property is an array, create a proxy to handle array methods
+            const watchedProperty = context.tagName === component.tagName;
+            if(watchedProperty){
+                Object.defineProperty(context, propertyName, {
+                  get: function() {
+                    return component['_' + propertyName];
+                  },
+                  set: function(value) {
+
+                    const primitiveValue = typeof value !== 'object' || value === null;
+                    if(!primitiveValue) {
+                      // If the value is an object, recursively add watchers to its properties
+                      Object.keys(value).forEach(key => {
                         recursivelyAddProxyWatchers(value, key, value[key], component);
-                    })
-                  };
-                  //if(!component.pendingRender){
-                    //component.pendingRender = true;
-                    component.render();
-                 // }
-                } 
-              });
+                      });
+                      component['_' + propertyName] = new Proxy(value, handler); // Store the value with a leading underscore
+
+                    } else {
+                      // If the value is a primitive, just set it directly
+                      component['_' + propertyName] = value;
+                    }
+                    // If the component is initialized, re-render it
+                    // This ensures that the component updates its display when properties change
+                    // This is important for 2-way data binding
+                    if(component.initialized)
+                      component.render();
+                  }
+                } )
+              }
+            
+            // If the property is a primitive value, set it directly on the context
+            // this will trigger the getter/setter defined above
+            if (primitivePropertyValue) {
+              
+              context[propertyName] = value;
             } else {
               // If the property is an object, recursively add watchers to its properties
               Object.keys(value).forEach(key => {
                 recursivelyAddProxyWatchers(value, key, value[key], component);
               });
+              context[propertyName] = new Proxy(value, handler);
+
             }
-            context[propertyName] = value; // Initialize the property
+            
+            
             
         }
        
-        const attributesToObserve = [];
-        this.watch.forEach(([propertyName, value, observe]) => {
-            
-            if(observe) 
-              attributesToObserve.push(propertyName)
-            //recursively create getters and setters for each property
+        this.watch.forEach(([propertyName, value]) => { 
             recursivelyAddProxyWatchers(this, propertyName, value, this);
         });
+        this.initialized = true;
     }
 
     // Required - Render method to update the content
@@ -109,6 +154,15 @@ class Base extends HTMLElement {
         return `
         
         `;
+    }
+
+    // Virtual - list of properties to watch for changes
+    // This should be overridden in subclasses to specify which properties to watch
+    // If not overridden, it will return an empty array
+    // This is used to trigger the render method when properties change
+    // Each item in the array should be in the format ['propertyName', propertyValue]
+    get watch() {
+      return [/*['propertyName', propertyValue],...*/];
     }
 
     // Virtual - list of observed attributes    
@@ -165,7 +219,7 @@ class Base extends HTMLElement {
   class MyGreeting extends Base {
     //Virtual - debug flag
     debug = true;
-    get watch() {return [['name', 'David', 0],['simple', 1], ['object', { name: { first: 'David', last: 'Smith' } }], ['list', []]]; }
+    get watch() {return [['name', 'David'],['simple', 1], ['object', { name: { first: 'David', last: 'Smith' } }], ['list', []]]; }
 
     // Virtual - run when populating the HTML 
     
@@ -186,38 +240,25 @@ class Base extends HTMLElement {
         `;
     }
     handleObject(){
-      this.object.name.first += ' Bob';
+      this.object.name.first = ' Bob';
     
     }
     handleSimple(){
       this.simple += 1;
+      // this.object = { name: { first: 'Tom', last: 'Roper' } };
     }
     handleList(){
       // Randomly update a name in the list  
       this.list.push({ name: 'New Item ' + (this.list.length + 1) });    
-      this.render();
+      // this.render();
       this.list[Math.floor(Math.random()*this.list.length)].name += ' Bob';
      
     }
     handleInput(event) {
       // Update the name attribute when the input changes
       this.name =  event.target.value;
-      
-      
     }
     
-    
-
-    
-
-    // Virtual - Handle attribute changes
-    
-
-    // Lifecycle method when added to the page
-    connectedCallback() {
-      // Initial render
-      //this.render();
-    }
   }
 
     class InnerGreeting extends Base {
