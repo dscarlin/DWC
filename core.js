@@ -11,9 +11,7 @@ class Base extends HTMLElement {
         // Create recursive setters for properties in the watch list
         this.setWatchers();
         // Create content - timeout allows inherited components propeties to be initialized before rendering
-        //this.pendingRender = true;
         this.render();
-         //setTimeout(() =>this.render());
     }
     // Required - Recursively add event listeners to child elements when HTML is rendered
     addEventListeners(children) {
@@ -71,6 +69,7 @@ class Base extends HTMLElement {
                     Object.keys(value).forEach(key => {
                       recursivelyAddProxyWatchers(value, key, value[key], component);
                     });
+                    value = new Proxy(value, handler); // Wrap the value in a proxy to handle nested properties
                   } 
                   if(component.initialized)
                     setTimeout(() => component.render(), 0);
@@ -216,71 +215,94 @@ class Base extends HTMLElement {
    
   
 
-  class MyGreeting extends Base {
+  class GameBoard extends Base {
     //Virtual - debug flag
     debug = true;
-    get watch() {return [['name', 'David'],['simple', 1], ['object', { name: { first: 'David', last: 'Smith' } }], ['list', []]]; }
+    get watch() {
+      return [
+        ['char', '1F600'],
+        ['players', []]
+      ]; 
+    }
 
     // Virtual - run when populating the HTML 
     
     get HTML() {
-        const listItem = item => `<div>${item.name}</div>`;
+        const player = player => `<div><strong>${player.name}</strong>${player.sprites}</div>`;
       // Use template literals to create the HTML content
         return `
-        
-        <input type="text" lstn="change:handleInput" placeholder="Enter your name" value="${this.name || ''}" />
-        <my-greeting-inner list-list=${JSON.stringify(this.list)}></my-greeting-inner>
-        <div><button  lstn="click:handleSimple">Simple ${this.simple}</button></div>
-        <div><button  lstn="click:handleObject">Update Name</button></div>
-        ${this.object?.name.first}
-        <div><button  lstn="click:handleList">Update Name</button></div>
+        <label style="display:block; font-weight: 800;"for="name">Player Name:</label>
+        <input name="name" type="text" lstn="input:handleInput" placeholder="New Player Name" value="${this.playerName || ''}" />
+        <button  lstn="click:addPlayer">Add Player</button>
+        <div>Character: <span style="font-size: 24px;" id="char">&#x${this.char}</span></div>
+        <button  lstn="click:decrementChar"><</button>
+        <button  lstn="click:incrementChar">></button>
 
-        ${this.list?.map(listItem).join('')}
-        <p>Hello, <span id="name">${this.name}</span>!</p>
+        <button  lstn="click:handleAction">Go!!!</button>
+        <button  lstn="click:handleReset">Reset!!!</button>
+        
+        ${this.players?.map(player).join('')}
         `;
     }
-    handleObject(){
-      this.object.name.first = ' Bob';
+    handleReset(){  
+      this.players.forEach(player => player.sprites = '');
+    }
+    handleAction(){
+      const randomPlayer = this.players[Math.floor(Math.random()*this.players.length)]
+      randomPlayer.sprites = randomPlayer.sprites + ' &#x' + randomPlayer.sprite;
+
     
     }
-    handleSimple(){
-      this.simple += 1;
-      // this.object = { name: { first: 'Tom', last: 'Roper' } };
+    incrementChar(e){
+      const hexVals =  '0123456789ABCDEF';
+      let toInc = this.char.substring(this.char.length - 2, this.char.length);
+      const lastCharIndex = hexVals.indexOf(toInc[1]);
+      if(lastCharIndex == hexVals.length - 1){
+        const charTwo = hexVals[0];
+        const charOne = hexVals[hexVals.indexOf(toInc[0]) + 1];
+        toInc = charOne + charTwo;
+      } else {
+        toInc = toInc[0] + hexVals[lastCharIndex + 1];
+      }
+      this.char = this.char.substring(0, this.char.length - 2) + toInc;
     }
-    handleList(){
-      // Randomly update a name in the list  
-      this.list.push({ name: 'New Item ' + (this.list.length + 1) });    
-      // this.render();
-      this.list[Math.floor(Math.random()*this.list.length)].name += ' Bob';
-     
+    decrementChar(e){
+      if(this.char == '1F600'){ return; }
+      const hexVals =  '0123456789ABCDEF';
+      let toDec = this.char.substring(this.char.length - 2, this.char.length);
+      const lastCharIndex = hexVals.indexOf(toDec[1]);
+      if(lastCharIndex == 0){
+        const charTwo  = hexVals[hexVals.length - 1];
+        const charOne = hexVals[hexVals.indexOf(toDec[0]) - 1];
+        toDec = charOne + charTwo;
+      } else {
+        toDec = toDec[0] + hexVals[lastCharIndex - 1];
+      }
+      this.char = this.char.substring(0, this.char.length - 2) + toDec;
     }
+    addPlayer(){
+      this.players.push({ name: this.playerName, sprites: '', sprite: this.char });  
+      this.playerName = '';
+      this.char = '1F600'; // Reset character to default
+      this.render();
+    }
+    
     handleInput(event) {
       // Update the name attribute when the input changes
-      this.name =  event.target.value;
+      this.playerName =  event.target.value;
     }
     
   }
 
-    class InnerGreeting extends Base {
-      static get observedAttributes() { return ['list-list']; }
-      get watch() { return [['list', [], 1]]; }
-      get HTML(){
-        return `
-        <p>Inner List: <span id="name">Hello from inside!</span></p>
-        
-        `;
-      }
-    }
+    
 
 
-  // Define the custom element
-    customElements.define('my-greeting-inner', InnerGreeting);
 
-  customElements.define('my-greeting', MyGreeting);
+  customElements.define('game-board', GameBoard);
 
 
   //page lands, calls server for data, determines which parent elements and pulls lists of depeneencies 
   //front end takes lists of dependencies and then constructs static resource calls and then adds elements to page
 
 const kernel = document.getElementById('app');
-kernel.innerHTML = '<my-greeting name="David"></my-greeting>';
+kernel.innerHTML = '<game-board></game-board>';
