@@ -1,7 +1,7 @@
 class Base extends HTMLElement {
     
     //Virtual - debug flag
-    debug = true;
+    debug = false;
 
     // Required - component initialization
     constructor() {
@@ -11,24 +11,18 @@ class Base extends HTMLElement {
         // Create recursive setters for properties in the watch list
         this.setWatchers();
         // Create content - timeout allows inherited components propeties to be initialized before rendering
-        this.render();
+        this.render(); 
     }
     // Required - Recursively add event listeners to child elements when HTML is rendered
     addEventListeners(children) {
-        // Recursively process child nodes
-        Array.from(children).forEach(child => {
-            if (child.nodeType === Node.ELEMENT_NODE) {
-                // Add event listeners to elements with 'lstn' attribute
-                if (child.hasAttribute('lstn')) {
-                    const [event, method] = child.getAttribute('lstn').split(':');
-                    if(typeof this[method] === 'function') {
-                        child.addEventListener(event, this[method].bind(this));
-                    }
-                }
-                // Recurse into child nodes
-                this.addEventListeners(child.children);
+        this.shadowRoot.querySelectorAll('[lstn]').forEach(element => {
+            const [event, method] = element.getAttribute('lstn').split(':');
+            if (typeof this[method] === 'function') {
+                element.addEventListener(event, this[method].bind(this));
+            } else {                  
+                this.log(`Handler method ${method} not found on component ${this.tagName}`);
             }
-        });
+        })
     }
 
     // Required - Debugging method
@@ -69,9 +63,11 @@ class Base extends HTMLElement {
                     Object.keys(value).forEach(key => {
                       recursivelyAddProxyWatchers(value, key, value[key], component);
                     });
-                    value = new Proxy(value, handler); // Wrap the value in a proxy to handle nested properties
+                    value = new Proxy(value, handler); // Wrap the value in a proxy to handle watch property changes
                   } 
+                  //skip render if the component is initializing
                   if(component.initialized)
+                    //allow for current thread competion before render by adding to the event loop
                     setTimeout(() => component.render(), 0);
                   return Reflect.set(target, property, value, receiver);
                 }
@@ -130,10 +126,17 @@ class Base extends HTMLElement {
             
         }
        
+        // Iterate over the watch array and add getters and setters for each property
+        // Each item in the watch array should be in the format ['propertyName', propertyValue]
+        // This allows the component to watch for changes to these properties and re-render when they change
+        // The propertyValue can be a primitive value or an object
+        // If the propertyValue is an object, it will recursively add it as a proxy and recursively add proxies for any object property values 
+        // If the propertyValue is an array, it will create a proxy to handle array methods and recursively set proxies for any object index values
+        // This allows for 2-way data binding
+        // The component will re-render when any of these properties change
         this.watch.forEach(([propertyName, value]) => { 
             recursivelyAddProxyWatchers(this, propertyName, value, this);
         });
-        this.initialized = true;
     }
 
     // Required - Render method to update the content
@@ -142,6 +145,9 @@ class Base extends HTMLElement {
         this.shadowRoot.innerHTML = this.HTML;
         // Add event listeners to the shadow DOM
         this.addEventListeners(this.shadowRoot.children);
+        if(!this.initialized){
+          this.initialized = true;
+        }
         
     }
 
@@ -180,7 +186,6 @@ class Base extends HTMLElement {
       function kebabToCamelCase(str) {
         return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
       }
-      this.log(`Attribute changed: ${name}, Old Value: ${oldValue}, New Value: ${newValue}`);
       function convertToType(value) {
         switch (typeof value) {
           case 'string':
